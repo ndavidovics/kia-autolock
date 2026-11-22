@@ -70,7 +70,10 @@ class Decide(unittest.TestCase):
         self.assertEqual(self.d(rd(sync=T0 - dt.timedelta(hours=1), hood=1)), "blocked")
 
     def test_cap_and_backoff(self):
-        self.st = {"locks_today": 3}
+        cap = self.cfg.max_lock_attempts_per_day
+        self.st = {"locks_today": cap - 1}
+        self.assertEqual(self.d(rd(sync=T0 - dt.timedelta(hours=1))), "lock")
+        self.st = {"locks_today": cap}
         self.assertEqual(self.d(rd(sync=T0 - dt.timedelta(hours=1))), "cap")
         self.st = {"next_lock_allowed_at": (T0 + dt.timedelta(minutes=5)).isoformat()}
         self.assertEqual(self.d(rd(sync=T0 - dt.timedelta(hours=1))), "backoff")
@@ -90,9 +93,9 @@ class Decide(unittest.TestCase):
         self.assertEqual(st["locks_today"], 0)
 
     def test_poll_delay(self):
-        self.assertEqual(poll_delay_min(rd(engine=True), {}, self.cfg, T0), 2)
+        self.assertEqual(poll_delay_min(rd(engine=True), {}, self.cfg, T0), self.cfg.poll_active_min)
         old = rd(sync=T0 - dt.timedelta(hours=2), locked=True)
-        self.assertEqual(poll_delay_min(old, {}, self.cfg, T0), 10)
+        self.assertEqual(poll_delay_min(old, {}, self.cfg, T0), self.cfg.poll_idle_min)
 
 
 class Zones(unittest.TestCase):

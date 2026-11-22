@@ -9,7 +9,7 @@ won't lock the car by itself. This small Linux service does: it watches the car 
   (including accessory power), every door, trunk and hood closed, for `unlocked_threshold_min` (default 5).
   If any value is missing it does nothing.
 - **Gentle on the car and on Kia's servers.** It reads Kia's cached status (doesn't wake the car), every
-  2 minutes while the car is active and every 10 while it sleeps. At most 3 lock commands and 4 sign-ins a
+  5 minutes while the car is active and every 10 while it sleeps. At most 8 lock commands and 4 sign-ins a
   day. It never requests a one-time code by itself and never retries a wrong password.
 - **Dry run first.** It ships with `dry_run = true`: it only logs `would_lock` until you turn that off.
 
@@ -115,8 +115,8 @@ Events: `locked`, `would_lock`, `lock_unconfirmed`, `door_open_long`, `cap_reach
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `unlocked_threshold_min` | 5 | Minutes parked, off, closed and unlocked before it locks |
-| `poll_active_min` / `poll_idle_min` | 2 / 10 | Check interval while the car is active / asleep |
-| `max_lock_attempts_per_day` | 3 | Hard cap on lock commands |
+| `poll_active_min` / `poll_idle_min` | 5 / 10 | Check interval while the car is active / asleep |
+| `max_lock_attempts_per_day` | 8 | Hard cap on lock commands |
 | `lock_confirm_timeout_s` | 150 | How long to wait for the car to confirm |
 | `quiet_hours` | "" | e.g. `"23:00-06:00"`; `quiet_hours_mode` = `skip` or `lock_only` |
 | `timezone` | America/Chicago | For quiet hours and the daily cap |

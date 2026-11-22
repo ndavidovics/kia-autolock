@@ -10,10 +10,10 @@ from zoneinfo import ZoneInfo
 @dataclass
 class Config:
     unlocked_threshold_min: float = 5
-    poll_active_min: float = 2
+    poll_active_min: float = 5
     poll_idle_min: float = 10
     active_window_min: float = 10
-    max_lock_attempts_per_day: int = 3
+    max_lock_attempts_per_day: int = 8
     min_gap_between_locks_min: float = 10
     lock_confirm_timeout_s: int = 150
     force_refresh_min_interval_min: float = 120
