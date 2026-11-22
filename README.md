@@ -42,14 +42,19 @@ the library and are **not supported** without changes (pull requests welcome).
 
 ## Install (Debian/Ubuntu with systemd, Python 3.12+)
 
-A Raspberry Pi or any always-on Linux box works.
+A Raspberry Pi or any always-on Linux box works, as long as it has **Python 3.12 or newer** (the Kia
+library needs it): Ubuntu 24.04+, Debian 13, or Raspberry Pi OS based on Debian 13 ("Trixie"). The older
+Raspberry Pi OS "Bookworm" has Python 3.11 and won't work. Check with `python3 --version`.
 
 ```sh
+sudo apt install git python3-venv
 git clone https://github.com/ndavidovics/kia-autolock.git
 cd kia-autolock
-sudo apt install python3-venv     # if needed
 sudo ./install.sh
 ```
+
+The installer takes under a minute, is safe to re-run (it keeps your settings, login and zones), and
+doesn't start anything until you enable the service.
 
 Then:
 
@@ -139,6 +144,8 @@ The service runs as its own unprivileged user (`ev9lock`) with systemd sandboxin
 password, session tokens, email or VIN.
 
 ## Development
+
+From the cloned folder (the installer doesn't copy the tests):
 
 ```sh
 /opt/ev9-autolock/venv/bin/python -m unittest tests/test_service.py
