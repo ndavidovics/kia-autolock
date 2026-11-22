@@ -14,7 +14,7 @@ from dataclasses import fields
 
 import requests
 
-from .core import Config, Reading, decide, iso, parse_dt, poll_delay_min, roll_day
+from .core import Config, Reading, decide, iso, parse_dt, poll_delay_min, roll_day, where
 from .util import Paths, RedactFilter, add_secret, append_jsonl, redact, utcnow, write_atomic
 
 log = logging.getLogger("ev9")
@@ -56,6 +56,20 @@ def load_secrets(paths: Paths) -> dict:
                     vals[k.strip()] = v.strip()
     add_secret(vals["KIA_USERNAME"], vals["KIA_PASSWORD"], vals["NOTIFY_WEBHOOK_URL"])
     return vals
+
+
+def load_zones(paths: Paths) -> list:
+    """No-lock zones from zones.json (managed by `ev9-autolock zone ...`). A broken file raises:
+    better to stop than to lock inside a zone the owner thinks is set."""
+    if not paths.zones.exists():
+        return []
+    data = json.loads(paths.zones.read_text())
+    zones = data.get("zones", []) if isinstance(data, dict) else []
+    for z in zones:
+        if not (isinstance(z.get("name"), str) and -90 <= float(z["lat"]) <= 90 and -180 <= float(z["lon"]) <= 180
+                and 10 <= float(z.get("radius_m", 150)) <= 5000):
+            raise ValueError(f"bad zone in {paths.zones}: {z.get('name')!r}")
+    return zones
 
 
 class State:
@@ -179,12 +193,25 @@ class Service:
             return delay
 
         paused = self.paths.pause.exists()
-        action, detail = decide(r, self.st, self.cfg, r.t, paused)
+        try:
+            zones = load_zones(self.paths)
+        except Exception as e:
+            self.notify_once("zones_bad", "zones_bad", f"cannot read no-lock zones ({redact(e)}); not locking")
+            log.warning("zones unreadable: %s", redact(e))
+            self.last = r
+            self.state.save()
+            return poll_delay_min(r, self.st, self.cfg, self.now())
+        self.st.setdefault("notified", {})["zones_bad"] = False
+        action, detail = decide(r, self.st, self.cfg, r.t, paused, zones)
         unl = parse_dt(self.st.get("unlocked_since"))
         unl_min = f"{(r.t - unl).total_seconds() / 60:.0f}m" if unl else "-"
-        log.info("poll locked=%s on=%s acc=%s park=%s open=%s reported=%s unlocked_for=%s action=%s %s",
+        zone = "-"
+        if zones:
+            kind, name = where(r, self.st, zones)
+            zone = name if kind == "zone" else kind
+        log.info("poll locked=%s on=%s acc=%s park=%s open=%s reported=%s unlocked_for=%s zone=%s action=%s %s",
                  r.locked, r.engine, r.ign3, r.park, sum(1 for d in [*r.doors, r.trunk, r.hood] if d),
-                 iso(r.car_sync), unl_min, action, detail)
+                 iso(r.car_sync), unl_min, zone, action, detail)
         n = self.st.setdefault("notified", {})
         if action == "blocked":
             self.notify_once("door_open", "door_open_long", detail)

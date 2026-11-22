@@ -64,6 +64,28 @@ Park, leave the car unlocked for more than 5 minutes, and check `sudo ev9-autolo
 `would_lock`. When you're happy, set `dry_run = false` in `/etc/ev9-autolock/config.toml` and run
 `sudo systemctl restart ev9-autolock`.
 
+## No-lock zones (e.g. your garage)
+
+Kia's cached status includes the car's last GPS position, so you can mark places where it should never
+lock. Park the car there, then:
+
+```sh
+sudo ev9-autolock zone add garage              # uses the car's current position, radius 150 m
+sudo ev9-autolock zone add garage --radius 50  # tighter, if you park on the street nearby too
+sudo ev9-autolock zone add work --lat 35.1495 --lon -90.0490 --radius 200
+sudo ev9-autolock zone list
+sudo ev9-autolock zone remove work
+```
+
+The command prints a map link so you can check the spot. Zones live in `/etc/ev9-autolock/zones.json`, and
+the service reads it on every check (no restart needed).
+
+Once you have any zone, the service locks only when it **knows** the car is outside all of them. If the car
+reports no position, or the position is older than the last time the car left Park, it does nothing (logged
+as `unknown`). Garages often block GPS. The car usually keeps its last fix from the driveway, which is why
+the default radius is 150 m. The position is never written to the logs or readings, only whether one was
+reported and when.
+
 ## Everyday commands
 
 ```sh
@@ -79,7 +101,7 @@ Put a webhook in `NOTIFY_WEBHOOK_URL` in `secrets.env`. The easiest is [ntfy](ht
 app, subscribe to a hard-to-guess topic, and set `NOTIFY_WEBHOOK_URL=https://ntfy.sh/<your-topic>`. Any other
 URL gets a JSON POST (`{"event", "time", "vehicle", "detail"}`), e.g. a Slack or Discord incoming webhook.
 Events: `locked`, `would_lock`, `lock_unconfirmed`, `door_open_long`, `cap_reached`, `needs_otp`,
-`auth_failed`, `login_cap`.
+`auth_failed`, `login_cap`, `zones_bad`.
 
 ## Configuration
 
@@ -99,7 +121,7 @@ Events: `locked`, `would_lock`, `lock_unconfirmed`, `door_open_long`, `cap_reach
 ## How it decides
 
 Every check: read the cached status. Locked → reset. Car on, accessory power on, or not in Park → reset (the
-car is in use). Otherwise, start a clock at the time the car reported being unlocked. Past the threshold,
+car is in use). Inside a no-lock zone → reset; zones set but position unknown or stale → wait. Otherwise, start a clock at the time the car reported being unlocked. Past the threshold,
 with everything closed and known, send one lock, wait for the car's answer, re-read the status to confirm,
 and back off (10 min, 30 min, then stop for the day) if it didn't take.
 
@@ -109,6 +131,7 @@ and back off (10 min, 30 min, then stop for the day) if it didn't take.
 | --- | --- |
 | `/opt/ev9-autolock` | code and its virtualenv |
 | `/etc/ev9-autolock/config.toml` | settings |
+| `/etc/ev9-autolock/zones.json` | no-lock zones (managed with `ev9-autolock zone`) |
 | `/etc/ev9-autolock/secrets.env` | login and webhook, root-only (0600) |
 | `/var/lib/ev9-autolock` | saved sign-in (password removed), state, readings, events |
 

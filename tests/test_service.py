@@ -17,9 +17,17 @@ from ev9_autolock.util import Paths, RedactFilter, add_secret, redact  # noqa: E
 T0 = dt.datetime(2026, 11, 22, 2, 0, tzinfo=dt.UTC)
 
 
-def rd(t=T0, sync=None, locked=False, engine=False, ign3=False, park=True, doors=(0, 0, 0, 0), trunk=0, hood=0):
+HOME = {"name": "garage", "lat": 35.1000, "lon": -89.9000, "radius_m": 150}
+NEAR = (35.1005, -89.9000)   # ~56 m north of HOME
+FAR = (35.1200, -89.9000)    # ~2.2 km north
+
+
+def rd(t=T0, sync=None, locked=False, engine=False, ign3=False, park=True, doors=(0, 0, 0, 0), trunk=0, hood=0,
+       pos=None, pos_sync=None):
     return Reading(t=t, car_sync=sync or t, locked=locked, engine=engine, ign3=ign3, park=park,
-                   doors=list(doors), trunk=trunk, hood=hood)
+                   doors=list(doors), trunk=trunk, hood=hood,
+                   lat=pos[0] if pos else None, lon=pos[1] if pos else None,
+                   loc_sync=(pos_sync or sync or t) if pos else None)
 
 
 class Decide(unittest.TestCase):
@@ -85,6 +93,50 @@ class Decide(unittest.TestCase):
         self.assertEqual(poll_delay_min(rd(engine=True), {}, self.cfg, T0), 2)
         old = rd(sync=T0 - dt.timedelta(hours=2), locked=True)
         self.assertEqual(poll_delay_min(old, {}, self.cfg, T0), 10)
+
+
+class Zones(unittest.TestCase):
+    def setUp(self):
+        self.cfg = Config(unlocked_threshold_min=5)
+        self.st = {}
+        self.old = T0 - dt.timedelta(minutes=30)
+
+    def d(self, r):
+        return decide(r, self.st, self.cfg, r.t, False, [HOME])[0]
+
+    def test_distance(self):
+        from ev9_autolock.core import distance_m
+        self.assertAlmostEqual(distance_m(*NEAR, HOME["lat"], HOME["lon"]), 55.6, delta=1)
+        self.assertAlmostEqual(distance_m(*FAR, HOME["lat"], HOME["lon"]), 2224, delta=5)
+
+    def test_inside_zone_never_locks(self):
+        self.assertEqual(self.d(rd(sync=self.old, pos=NEAR)), "in_zone")
+        self.assertIsNone(self.st["unlocked_since"])
+
+    def test_outside_zone_locks(self):
+        self.assertEqual(self.d(rd(sync=self.old, pos=FAR)), "lock")
+
+    def test_no_position_never_locks(self):
+        self.assertEqual(self.d(rd(sync=self.old)), "unknown")
+
+    def test_position_from_before_last_drive_never_locks(self):
+        drive = T0 - dt.timedelta(minutes=20)
+        self.d(rd(t=drive, sync=drive, engine=True, park=False, pos=FAR))   # seen driving at T0-20
+        # parked now, but the car's position is from T0-60 (before that drive)
+        r = rd(sync=self.old, pos=FAR, pos_sync=T0 - dt.timedelta(minutes=60))
+        self.assertEqual(self.d(r), "unknown")
+        # position reported after the drive -> trusted
+        r = rd(sync=self.old, pos=FAR, pos_sync=drive + dt.timedelta(minutes=1))
+        self.assertEqual(self.d(r), "lock")
+
+    def test_accessory_power_in_park_keeps_position(self):
+        acc = T0 - dt.timedelta(minutes=20)
+        self.d(rd(t=acc, sync=acc, ign3=True, pos=FAR, pos_sync=T0 - dt.timedelta(minutes=60)))
+        r = rd(sync=self.old, pos=FAR, pos_sync=T0 - dt.timedelta(minutes=60))
+        self.assertEqual(self.d(r), "lock")
+
+    def test_no_zones_ignores_position(self):
+        self.assertEqual(decide(rd(sync=self.old), {}, self.cfg, T0, False, [])[0], "lock")
 
 
 class FakeClient:
@@ -195,6 +247,29 @@ class Loop(unittest.TestCase):
             pass
         c = FakeClient([rd()], raise_on_read=RateLimitingError("slow down"))
         self.assertEqual(self.svc(c).poll_once(), 60)
+
+    def write_zones(self, text):
+        self.paths.zones.write_text(text)
+
+    def test_zone_file_respected(self):
+        self.write_zones(json.dumps({"zones": [HOME]}))
+        c = FakeClient([rd(sync=T0 - dt.timedelta(minutes=20), pos=NEAR)])
+        self.svc(c).poll_once()
+        self.assertEqual(c.locks, 0)
+
+    def test_broken_zone_file_never_locks(self):
+        self.write_zones("{not json")
+        c = FakeClient([rd(sync=T0 - dt.timedelta(minutes=20), pos=FAR)])
+        s = self.svc(c)
+        s.poll_once()
+        s.poll_once()
+        self.assertEqual(c.locks, 0)
+        self.assertEqual(self.events().count("zones_bad"), 1)
+
+    def test_kia_timestamp(self):
+        from ev9_autolock.kia import _kia_utc
+        self.assertEqual(_kia_utc("20261122023855.901"), dt.datetime(2026, 11, 22, 2, 38, 55, tzinfo=dt.UTC))
+        self.assertIsNone(_kia_utc("garbage"))
 
     def test_state_file_mode(self):
         s = self.svc(FakeClient([rd(locked=True)]))

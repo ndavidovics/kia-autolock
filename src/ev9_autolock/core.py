@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 
@@ -45,6 +46,9 @@ class Reading:
     charging: bool | None = None
     plugged: object = None
     soc: object = None
+    lat: float | None = None
+    lon: float | None = None
+    loc_sync: dt.datetime | None = None  # when the car last reported its position (UTC)
 
     def openings_known(self) -> bool:
         return all(v is not None for v in [*self.doors, self.trunk, self.hood])
@@ -54,6 +58,35 @@ class Reading:
 
     def in_use(self) -> bool:
         return bool(self.engine) or bool(self.ign3) or self.park is False
+
+
+def distance_m(lat1, lon1, lat2, lon2) -> float:
+    """Great-circle distance in metres."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371000 * math.asin(math.sqrt(a))
+
+
+def where(r: Reading, st: dict, zones: list) -> tuple[str, str]:
+    """('zone', name) | ('outside', '') | ('unknown', why). Only meaningful when zones exist.
+
+    The position counts only if the car reported it after it was last seen out of Park (a position from
+    before the last drive could be anywhere). Accessory power or "on" in Park doesn't move the car.
+    """
+    if r.lat is None or r.lon is None:
+        return "unknown", "car reports no position"
+    last_use = parse_dt(st.get("last_moved_sync"))
+    if last_use and (r.loc_sync is None or r.loc_sync < last_use - dt.timedelta(minutes=2)):
+        return "unknown", "position is from before the last drive"
+    best = None
+    for z in zones:
+        d = distance_m(r.lat, r.lon, z["lat"], z["lon"])
+        if d <= z.get("radius_m", 150) and (best is None or d < best[1]):
+            best = (z["name"], d)
+    if best:
+        return "zone", best[0]
+    return "outside", ""
 
 
 def parse_dt(s):
@@ -98,10 +131,12 @@ def roll_day(st: dict, cfg: Config, now: dt.datetime) -> None:
         st.setdefault("notified", {})["cap_reached"] = False
 
 
-def decide(r: Reading, st: dict, cfg: Config, now: dt.datetime, paused: bool) -> tuple[str, str]:
-    """Return (action, detail). Mutates st['unlocked_since'] and 'notified' flags.
+def decide(r: Reading, st: dict, cfg: Config, now: dt.datetime, paused: bool, zones: list | None = None) -> tuple[str, str]:
+    """Return (action, detail). Mutates st['unlocked_since'], 'last_moved_sync' and 'notified' flags.
 
-    actions: paused, quiet, unknown, locked, in_use, wait, blocked, cap, backoff, lock
+    actions: paused, quiet, unknown, locked, in_use, in_zone, wait, blocked, cap, backoff, lock
+    zones: no-lock zones [{name, lat, lon, radius_m}]. When any exist, the car must be known to be
+    outside all of them; an unknown or stale position never locks.
     """
     notified = st.setdefault("notified", {})
     if paused:
@@ -117,8 +152,18 @@ def decide(r: Reading, st: dict, cfg: Config, now: dt.datetime, paused: bool) ->
         return "locked", ""
     if r.in_use():
         st["unlocked_since"] = None
+        if r.park is False:
+            st["last_moved_sync"] = iso(r.car_sync or now)
         notified["door_open"] = False
         return "in_use", f"engine={r.engine} acc={r.ign3} park={r.park}"
+    if zones:
+        kind, name = where(r, st, zones)
+        if kind == "zone":
+            st["unlocked_since"] = None
+            notified["door_open"] = False
+            return "in_zone", name
+        if kind == "unknown":
+            return "unknown", f"no-lock zones set but {name}"
     # unlocked, off, in Park
     if not st.get("unlocked_since"):
         st["unlocked_since"] = iso(r.car_sync or now)

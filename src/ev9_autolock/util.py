@@ -67,6 +67,10 @@ class Paths:
         return self.state_dir / "PAUSE"
 
     @property
+    def zones(self) -> Path:
+        return self.config.parent / "zones.json"
+
+    @property
     def lock(self) -> Path:
         return self.state_dir / "run.lock"
 

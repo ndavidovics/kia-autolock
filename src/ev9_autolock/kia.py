@@ -115,17 +115,30 @@ class KiaClient:
         sync = v.last_updated_at
         if sync is not None:
             sync = sync.astimezone(dt.UTC)
+        lat = lon = loc_sync = None
+        loc = (state.get("lastVehicleInfo") or {}).get("location") if isinstance(state, dict) else None
+        if isinstance(loc, dict):
+            co = loc.get("coord") or {}
+            try:
+                lat, lon = float(co["lat"]), float(co["lon"])
+                if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
+                    lat = lon = None
+            except (KeyError, TypeError, ValueError):
+                lat = lon = None
+            loc_sync = _kia_utc((loc.get("syncDate") or {}).get("utc"))
         r = Reading(
             t=now, car_sync=sync, locked=v.is_locked, engine=v.engine_is_running,
             ign3=vs.get("ign3"), park=vs.get("transCond"),
             doors=[v.front_left_door_is_open, v.front_right_door_is_open, v.back_left_door_is_open, v.back_right_door_is_open],
             trunk=v.trunk_is_open, hood=v.hood_is_open, charging=v.ev_battery_is_charging,
             plugged=v.ev_battery_is_plugged_in, soc=v.ev_battery_percentage,
+            lat=lat, lon=lon, loc_sync=loc_sync,
         )
         append_jsonl(self.paths.readings, {
             "t": r.t.isoformat(timespec="seconds"), "car_sync": sync.isoformat(timespec="seconds") if sync else None,
             "locked": r.locked, "engine": r.engine, "acc": r.ign3, "park": r.park, "doors": r.doors,
-            "trunk": r.trunk, "hood": r.hood, "charging": r.charging, "plugged": r.plugged, "soc": r.soc})
+            "trunk": r.trunk, "hood": r.hood, "charging": r.charging, "plugged": r.plugged, "soc": r.soc,
+            "pos": lat is not None, "pos_sync": loc_sync.isoformat(timespec="seconds") if loc_sync else None})
         return r
 
     def force_refresh(self) -> None:
@@ -139,3 +152,13 @@ class KiaClient:
     def action_status(self, xid: str, timeout: int) -> str:
         st = self._guard(self.vm.check_action_status, self.vehicle.id, xid, synchronous=True, timeout=timeout)
         return getattr(st, "name", str(st))
+
+
+def _kia_utc(s):
+    """Kia's 'YYYYMMDDHHMMSS[.fff]' UTC stamp -> aware datetime, or None."""
+    if not s:
+        return None
+    try:
+        return dt.datetime.strptime(str(s)[:14], "%Y%m%d%H%M%S").replace(tzinfo=dt.UTC)
+    except ValueError:
+        return None
