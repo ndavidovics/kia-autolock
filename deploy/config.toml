@@ -1,0 +1,17 @@
+# /etc/ev9-autolock/config.toml  (root:ev9lock 0640). Restart the service after editing:
+#   systemctl restart ev9-autolock
+region = 3                       # USA
+brand = 1                        # Kia
+vehicle_vin_suffix = ""          # empty = the only car on the account
+unlocked_threshold_min = 5       # parked, off, closed and unlocked this long -> lock
+poll_active_min = 2              # car on / reported in the last 10 min / unlock clock running
+poll_idle_min = 10               # car asleep
+max_lock_attempts_per_day = 3
+min_gap_between_locks_min = 10
+lock_confirm_timeout_s = 150     # a sleeping car takes up to ~80 s to answer
+force_refresh_min_interval_min = 120
+quiet_hours = ""                 # e.g. "23:00-06:00"
+quiet_hours_mode = "skip"        # skip | lock_only
+timezone = "America/Chicago"
+dry_run = true                   # true = only log "would_lock"
+log_level = "INFO"               # never DEBUG

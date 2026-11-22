@@ -1,0 +1,9 @@
+certifi==2026.11.20
+charset-normalizer==3.5.2
+hyundai_kia_connect_api==5.2.1
+idna==3.20
+paho-mqtt==2.2.0
+pycryptodome==3.24.1
+requests==2.34.2
+tzdata==2026.6
+urllib3==2.8.0

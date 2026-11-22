@@ -1,0 +1,3 @@
+#!/bin/sh
+export PYTHONPATH=/opt/ev9-autolock/src
+exec /opt/ev9-autolock/venv/bin/python -m ev9_autolock "$@"
